@@ -2,7 +2,7 @@ package com.hmdp.utils;
 
 public class RedisConstants {
     public static final String LOGIN_CODE_KEY = "login:code:";
-    public static final Long LOGIN_CODE_TTL = 2L;
+    public static final Long LOGIN_CODE_TTL = 2L;//2分钟
     public static final String LOGIN_USER_KEY = "login:token:";
     public static final Long LOGIN_USER_TTL = 36000L;
 
@@ -19,4 +19,6 @@ public class RedisConstants {
     public static final String FEED_KEY = "feed:";
     public static final String SHOP_GEO_KEY = "shop:geo:";
     public static final String USER_SIGN_KEY = "sign:";
+
+    public static final String CACHE_SHOP_TYPE_KEY = "cache:shop:type:";
 }

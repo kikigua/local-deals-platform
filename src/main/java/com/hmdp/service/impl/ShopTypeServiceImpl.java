@@ -1,10 +1,19 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONUtil;
+import com.hmdp.dto.Result;
+import com.hmdp.entity.Shop;
 import com.hmdp.entity.ShopType;
 import com.hmdp.mapper.ShopTypeMapper;
 import com.hmdp.service.IShopTypeService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.RedisConstants;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+
+import javax.annotation.Resource;
+import java.util.List;
 
 /**
  * <p>
@@ -17,4 +26,31 @@ import org.springframework.stereotype.Service;
 @Service
 public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> implements IShopTypeService {
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+    /**
+     * 查询店铺类型信息redis
+     * @return
+     */
+    @Override
+    public List<ShopType> queryTypeList() {
+        //1、从redis中查询商铺缓存
+        String cacheKey = RedisConstants.CACHE_SHOP_TYPE_KEY;
+        //2、判断是否存在
+        String shopTypeJson = stringRedisTemplate.opsForValue().get(cacheKey);
+        if (StrUtil.isNotBlank(shopTypeJson)) {
+            //3、存在，返回商铺信息
+            return JSONUtil.toList(shopTypeJson, ShopType.class);
+        }
+        //4、不存在，查询数据库
+        List<ShopType> shopTypeList = list();
+        //5、不存在，返回错误
+        if (shopTypeList == null) {
+            return null;
+        }
+        //6、存在，写入redis
+        stringRedisTemplate.opsForValue().set(cacheKey, JSONUtil.toJsonStr(shopTypeList));
+        //7、返回结果
+        return shopTypeList;
+    }
 }
