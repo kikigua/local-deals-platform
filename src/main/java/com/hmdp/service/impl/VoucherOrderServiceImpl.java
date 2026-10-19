@@ -8,15 +8,23 @@ import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
+import lombok.extern.slf4j.Slf4j;
+import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.aop.framework.AopContext;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
 import java.util.Collections;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * <p>
@@ -26,6 +34,7 @@ import java.util.Collections;
  * @author 虎哥
  * @since 2021-12-22
  */
+@Slf4j
 @Service
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
 
@@ -47,12 +56,98 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
         SECKILL_SCRIPT.setResultType(Long.class);
     }
+    //阻塞队列
+    private BlockingQueue<VoucherOrder> blockingQueue = new ArrayBlockingQueue<>(1024 * 1024);
+    //异步处理线程池
+    private static final ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor();
+
+    /**
+     * 初始化线程池：创建一个单线程的线程池，用于处理阻塞队列中的订单信息
+     */
+    //在类初始化之后执行，因为当这个类初始化好了之后，随时都是有可能要执行的
+    @PostConstruct
+    private void init(){
+        SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
+    }
+    /**
+     * 从阻塞队列中获取订单信息并创建订单
+     */
+    // 用于线程池处理的任务
+    // 当初始化完毕后，就会去从阻塞队列中获取订单信息
+    private class VoucherOrderHandler implements Runnable {
+        @Override
+        public void run() {
+            while (true) {
+                try {
+                    //1、获取阻塞队列中的订单信息
+                    VoucherOrder voucherOrder = blockingQueue.take();
+                    //2、创建订单
+                    handleVoucherOrder(voucherOrder);
+                } catch (Exception e) {
+                    log.error("处理订单异常", e);
+                }
+            }
+        }
+    }
+
+    /**
+     * 属于哪个类？属于VoucherOrderHandler
+      * 创建订单方法实现，使用Redisson实现分布式锁
+     */
+    private void handleVoucherOrder(VoucherOrder voucherOrder) {
+        //1、获取用户
+        Long userId = voucherOrder.getUserId();
+        //2、创建锁对象(使用锁工具类redisson创建)
+        RLock lock = redissonClient.getLock("lock:order:" + userId);
+        //3、获取锁
+        boolean isLock = lock.tryLock();
+        //4、判断是否获取锁成功
+        if (!isLock) {
+            log.error("请勿重复下单！");
+            return;
+        }
+        try {
+            proxy.createVoucherOrder(voucherOrder);
+        } finally {
+            lock.unlock();
+        }
+    }
+    /**
+     * 创建订单方法实现，使用Redisson实现分布式锁
+     */
+    @Transactional
+    public void createVoucherOrder(VoucherOrder voucherOrder) {
+        //5. 一人一单
+        Long userId = UserHolder.getUser().getId();
+        //5.1、判断用户已经下过订单
+        int count = query().eq("user_id", userId).eq("voucher_id", voucherOrder.getVoucherId()).count();
+        //5.2、判断是否存在订单
+        if (count > 0) {
+            log.error("用户已经下过订单！");
+            return;
+        }
+        //6. 扣减库存
+        boolean success = seckillVoucherService.update()
+                .setSql("stock = stock - 1")
+                .eq("voucher_id", voucherOrder.getVoucherId()).gt("stock", 0)
+                .update();
+        //       UPDATE seckill_voucher
+        //        SET stock = stock - 1
+        //        WHERE voucher_id = ? AND stock > 0;
+        if (!success) {
+            log.error("库存不足！");
+            return;
+        }
+        //7.4 保存订单到数据库
+        save(voucherOrder);
+    }
 
     /**
      * 抢购秒杀优惠券(优化后)
      * @param voucherId
      * @return
      */
+    private IVoucherOrderService proxy;
     @Override
     public Result seckillVoucher(Long voucherId) {
         //1、执行lua脚本
@@ -70,8 +165,15 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         }
         //2.2、为0，代表有购买资格，把下单信息保存到阻塞队列
         long orderId = redisIdWorker.nextId("order:");
-        //TODO 保存订单信息到阻塞队列
 
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setId(orderId);
+        voucherOrder.setUserId(userId);
+        voucherOrder.setVoucherId(voucherId);
+        //保存阻塞队列
+        blockingQueue.add(voucherOrder);
+        //3、获取代理对象
+        proxy = (IVoucherOrderService) AopContext.currentProxy();
         //3、返回订单id
         return Result.ok(orderId);
     }
@@ -118,39 +220,5 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 //        }
 //    }
 
-    @Transactional
-    public Result createVoucherOrder(Long voucherId) {
-        //5. 一人一单
-        Long userId = UserHolder.getUser().getId();
-        //5.1、判断用户已经下过订单
-        int count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
-        //5.2、判断是否存在订单
-        if (count > 0) {
-            return Result.fail("用户已经下过订单！");
-        }
-        //6. 扣减库存
-        boolean success = seckillVoucherService.update()
-                .setSql("stock = stock - 1")
-                .eq("voucher_id", voucherId).gt("stock", 0)
-                .update();
-    //       UPDATE seckill_voucher
-    //        SET stock = stock - 1
-    //        WHERE voucher_id = ? AND stock > 0;
-        if (!success) {
-            return Result.fail("库存不足！");
-        }
-        //7. 创建订单
-        VoucherOrder voucherOrder = new VoucherOrder();
-        //7.1 生成订单id
-        long orderId = redisIdWorker.nextId("order:");
-        voucherOrder.setId(orderId);
-        //7.2 获取用户id
-        voucherOrder.setUserId(userId);
-        //7.3 获取优惠券id
-        voucherOrder.setVoucherId(voucherId);
-        //7.4 保存订单到数据库
-        save(voucherOrder);
-        //8. 返回订单id
-        return Result.ok(orderId);
-        }
+
 }
