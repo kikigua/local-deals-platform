@@ -96,7 +96,12 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     private void isBlogLiked(Blog blog) {
         //1、获取登录用户id
-        Long userId = UserHolder.getUser().getId();
+        UserDTO user = UserHolder.getUser();
+        if (user == null) {
+            //未登录，则直接返回，无需查询是否点赞
+            return;
+        }
+        Long userId = user.getId();
         //2、判断当前用户是否点赞
         String key = BLOG_LIKED_KEY + blog.getId();
         Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
@@ -135,4 +140,31 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         return Result.ok();
     }
 
+    /**
+     * 查询探店博文的点赞榜
+     */
+    @Override
+    public Result queryBlogLikes(Long id) {
+        String key = BLOG_LIKED_KEY + id;
+        //1、查询top5的点赞用户
+        Set<String> top5 = stringRedisTemplate.opsForZSet().range(key, 0, 4);
+        if (top5 == null || top5.isEmpty()) {
+            return Result.ok(Collections.emptyList());
+        }
+        //2、解析出其中的用户id
+        List<Long> ids = top5.stream().map(Long::valueOf).collect(Collectors.toList());
+        //3、根据用户id查询用户SELECT id,phone,password,nick_name,icon,create_time,update_time FROM tb_user WHERE id IN ( 5 , 1 )ORDER BY FIELD(id, 5 , 1 )
+        //自定义查询
+        String joinId = StrUtil.join(",", ids);
+        List<UserDTO> userDTOS = userService.query()
+                .in("id", ids)
+                .last("ORDER BY FIELD(id," + joinId + ")").list()
+                .stream()
+                .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
+                .collect(Collectors.toList());
+        //4、返回结果
+        return Result.ok(userDTOS);
+//        range 决定“取哪 5 个人、按什么顺序”；FIELD 或 Java 重排决定“查出来后别被 MySQL 打乱”。
+//        第一步是源头，第三步是兜底，两者必须方向一致。 只改第一步不够（IN 会打乱），只留第三步也不行（mysql会打乱顺序，源头顺序反了，FIELD 只会忠实排出反序）。
+    }
 }

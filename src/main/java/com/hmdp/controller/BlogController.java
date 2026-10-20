@@ -70,4 +70,12 @@ public class BlogController {
     public Result queryBlogById(@PathVariable("id") Long id) {
         return blogService.queryBlogById(id);
     }
+
+    /**
+     * 根据id查询探店博文的点赞榜(有用户点赞的头像)
+     */
+    @GetMapping("/likes/{id}")
+    public Result queryBlogLikes(@PathVariable("id") Long id) {
+        return blogService.queryBlogLikes(id);
+    }
 }

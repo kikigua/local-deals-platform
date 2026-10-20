@@ -28,4 +28,9 @@ public interface IBlogService extends IService<Blog> {
      * 点赞操作（只能点一次，对每个blog）
      */
     Result likeBlog(Long id);
+
+    /**
+     * 查询探店博文的点赞榜
+     */
+    Result queryBlogLikes(Long id);
 }
