@@ -99,8 +99,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         Long userId = UserHolder.getUser().getId();
         //2、判断当前用户是否点赞
         String key = BLOG_LIKED_KEY + blog.getId();
-        boolean isMember = stringRedisTemplate.opsForSet().isMember(key, userId.toString());
-        blog.setIsLike(BooleanUtil.isTrue(isMember));
+        Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
+        blog.setIsLike(score != null);
     }
 
     /**
@@ -112,14 +112,15 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         Long userId = UserHolder.getUser().getId();
         //2、判断当前用户是否点赞
         String key = BLOG_LIKED_KEY + id;
-        boolean isMember = stringRedisTemplate.opsForSet().isMember(key, userId.toString());
-        if (BooleanUtil.isFalse(isMember)) {
+        Double score = stringRedisTemplate.opsForZSet().score(key, userId.toString());
+        if (score == null) {
             //3、如果未点赞，则点赞
             //3.1、数据库点赞数量+1
             boolean isSuccess = update().setSql("liked = liked + 1").eq("id", id).update();
             //3.2、保存用户到redis的set集合
             if (isSuccess) {
-                stringRedisTemplate.opsForSet().add(key, userId.toString());
+                //解释一下ZSet，ZSet是Redis中的一个数据结构，类似于Set，但每个元素关联一个分数（时间戳），可以用于排序
+                stringRedisTemplate.opsForZSet().add(key, userId.toString(), System.currentTimeMillis());
             }
         }else {
             //4、如果已点赞，则取消点赞
@@ -127,7 +128,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             //4.1、数据库点赞数量-1
             if (isSuccess) {
                 //4.2、从redis的set集合中删除用户
-                stringRedisTemplate.opsForSet().remove(key, userId.toString());
+                stringRedisTemplate.opsForZSet().remove(key, userId.toString());
             }
         }
         //5、返回结果
