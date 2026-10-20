@@ -23,4 +23,9 @@ public interface IBlogService extends IService<Blog> {
      * 查询热门探店博文
      */
     Result queryHotBlog(Integer current);
+
+    /**
+     * 点赞操作（只能点一次，对每个blog）
+     */
+    Result likeBlog(Long id);
 }
