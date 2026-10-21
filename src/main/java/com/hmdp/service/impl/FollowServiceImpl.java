@@ -7,7 +7,10 @@ import com.hmdp.mapper.FollowMapper;
 import com.hmdp.service.IFollowService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.UserHolder;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+
+import javax.annotation.Resource;
 
 /**
  * <p>
@@ -20,6 +23,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> implements IFollowService {
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
     /**
      * 关注或取消关注用户
      */
@@ -30,12 +36,21 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
         if (userId == null) {
             return Result.fail("未登录");
         }
+        String key = "follows:" + userId;//存入Redis的key
         if (isFollow) {
             //2. 执行关注：新增数据
-            save(new Follow().setUserId(userId).setFollowUserId(followUserId));
+            boolean save = save(new Follow().setUserId(userId).setFollowUserId(followUserId));
+            if (save) {
+                //3. 添加Redis数据
+                stringRedisTemplate.opsForSet().add(key, followUserId.toString());
+            }
         } else {
-            //3. 执行取关：删除数据
-            remove(new QueryWrapper<Follow>().eq("user_id", userId).eq("follow_user_id", followUserId));
+            //4. 执行取关：删除数据
+            boolean isRemove = remove(new QueryWrapper<Follow>().eq("user_id", userId).eq("follow_user_id", followUserId));
+            if (isRemove) {
+                //5. 删除Redis数据
+                stringRedisTemplate.opsForSet().remove(key, followUserId.toString());
+            }
         }
         return Result.ok();
     }
