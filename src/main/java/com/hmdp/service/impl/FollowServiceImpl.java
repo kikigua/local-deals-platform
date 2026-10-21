@@ -1,16 +1,24 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.hmdp.dto.Result;
+import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.Follow;
 import com.hmdp.mapper.FollowMapper;
 import com.hmdp.service.IFollowService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.UserHolder;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * <p>
@@ -25,6 +33,8 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private UserServiceImpl userService;
 
     /**
      * 关注或取消关注用户
@@ -69,5 +79,32 @@ public class FollowServiceImpl extends ServiceImpl<FollowMapper, Follow> impleme
         Integer count = query().eq("user_id", userId).eq("follow_user_id", followUserId).count();
         //3. 返回结果
         return Result.ok(count > 0);
+    }
+
+    /**
+     * 根据用户id查询共同关注的用户列表
+     */
+    @Override
+    public Result followCommons(Long id) {
+        //1. 获取当前登录用户
+        Long userId = UserHolder.getUser().getId();
+        if (userId == null) {
+            return Result.fail("未登录");
+        }
+        //2.求交集
+        String key = "follows:" + userId;//当前用户
+        String key2 = "follows:" + id;//目标用户（传入的）
+        Set<String> intersect = stringRedisTemplate.opsForSet().intersect(key, key2);//获取交集
+        if (intersect == null || intersect.isEmpty()) {
+            return Result.ok(Collections.emptyList());
+        }
+        //3.将id集合转换为List<Long>并返回
+        List<Long> ids = intersect.stream().map(Long::valueOf).collect(Collectors.toList());
+        //4.查询用户列表
+        List<UserDTO> users = userService.listByIds(ids)
+                .stream()
+                .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
+                .collect(Collectors.toList());
+        return Result.ok(users);
     }
 }

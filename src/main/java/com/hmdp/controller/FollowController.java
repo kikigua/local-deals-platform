@@ -23,18 +23,25 @@ public class FollowController {
     private IFollowService followService;
 
     /**
-     * 关注或取消关注用户
+     * 关注或取消关注用户redis
      */
     @PutMapping("/{id}/{isFollow}")
     public Result follow(@PathVariable("id") Long followUserId, @PathVariable("isFollow") Boolean isFollow) {
         return followService.follow(followUserId, isFollow);
     }
-
     /**
-     * 根据用户id查询是否关注了该用户
+     * 判断当前用户是否关注了该用户redis
      */
     @GetMapping("/or/not/{id}")
     public Result isFollow(@PathVariable("id") Long followUserId) {
         return followService.isFollow(followUserId);
+    }
+
+    /**
+     * 根据用户id查询共同关注的用户列表redis
+     */
+    @GetMapping("/common/{id}")
+    public Result followCommons(@PathVariable("id") Long id) {
+        return followService.followCommons(id);
     }
 }
