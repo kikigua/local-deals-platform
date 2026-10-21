@@ -46,6 +46,8 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     private IUserService userService;
     @Autowired
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private IFollowService followService;
 
     /**
      * 查询热门探店博文
@@ -166,5 +168,29 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         return Result.ok(userDTOS);
 //        range 决定“取哪 5 个人、按什么顺序”；FIELD 或 Java 重排决定“查出来后别被 MySQL 打乱”。
 //        第一步是源头，第三步是兜底，两者必须方向一致。 只改第一步不够（IN 会打乱），只留第三步也不行（mysql会打乱顺序，源头顺序反了，FIELD 只会忠实排出反序）。
+    }
+
+    @Override
+    public Result saveBlog(Blog blog) {
+        // 获取登录用户
+        UserDTO user = UserHolder.getUser();
+        blog.setUserId(user.getId());
+        // 保存探店博文
+        boolean isSuccess = save(blog);
+        if (!isSuccess) {
+            return Result.fail("保存失败");
+        }
+        //查询作者的所有粉丝select * from tb_follow where follow_user_id = ?
+        List<Follow> follows = followService.query().eq("follow_user_id", user.getId()).list();
+        //推送笔记博文id给所有粉丝
+        for (Follow follow : follows) {
+            //获取粉丝id
+            Long userId = follow.getUserId();
+            //将笔记博文id推送给粉丝
+            String key = FEED_KEY + userId;
+            stringRedisTemplate.opsForZSet().add(key, blog.getId().toString(), System.currentTimeMillis());
+        }
+        // 返回id
+        return Result.ok(blog.getId());
     }
 }

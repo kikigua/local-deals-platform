@@ -33,4 +33,9 @@ public interface IBlogService extends IService<Blog> {
      * 查询探店博文的点赞榜
      */
     Result queryBlogLikes(Long id);
+
+    /**
+     * 保存探店博文
+     */
+    Result saveBlog(Blog blog);
 }

@@ -31,22 +31,29 @@ public class BlogController {
     @Resource
     private IBlogService blogService;
 
+    /**
+     * 保存探店博文到数据库
+     * 拓展：1、推送到粉丝收件箱；
+     *      2、收件箱根据时间戳排序，利用redis的数据结构实现；
+     *      3、查询收件箱数据时，实现分页查询。
+     *      4、Feed流中的数据会不断更新，所以数据的角标会不断变化，因此不能采用传统的分页模式。
+     */
     @PostMapping
     public Result saveBlog(@RequestBody Blog blog) {
-        // 获取登录用户
-        UserDTO user = UserHolder.getUser();
-        blog.setUserId(user.getId());
-        // 保存探店博文
-        blogService.save(blog);
-        // 返回id
-        return Result.ok(blog.getId());
+        return blogService.saveBlog(blog);
     }
 
+    /**
+     * 点赞探店博文
+     */
     @PutMapping("/like/{id}")
     public Result likeBlog(@PathVariable("id") Long id) {
         return blogService.likeBlog(id);
     }
 
+    /**
+     * 根据用户查询探店博文
+     */
     @GetMapping("/of/me")
     public Result queryMyBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {
         // 获取登录用户
@@ -59,6 +66,9 @@ public class BlogController {
         return Result.ok(records);
     }
 
+    /**
+     * 查询热门探店博文
+     */
     @GetMapping("/hot")
     public Result queryHotBlog(@RequestParam(value = "current", defaultValue = "1") Integer current) {
         return blogService.queryHotBlog(current);
@@ -70,9 +80,8 @@ public class BlogController {
     public Result queryBlogById(@PathVariable("id") Long id) {
         return blogService.queryBlogById(id);
     }
-
     /**
-     * 根据id查询探店博文的点赞榜(有用户点赞的头像)
+     * 根据id查询探店博文
      */
     @GetMapping("/likes/{id}")
     public Result queryBlogLikes(@PathVariable("id") Long id) {
