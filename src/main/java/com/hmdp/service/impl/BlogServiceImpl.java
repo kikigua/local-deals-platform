@@ -96,6 +96,9 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         return Result.ok(blog);
     }
 
+    /**
+     * 判断当前用户是否点赞
+     */
     private void isBlogLiked(Blog blog) {
         //1、获取登录用户id
         UserDTO user = UserHolder.getUser();
@@ -170,11 +173,18 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 //        第一步是源头，第三步是兜底，两者必须方向一致。 只改第一步不够（IN 会打乱），只留第三步也不行（mysql会打乱顺序，源头顺序反了，FIELD 只会忠实排出反序）。
     }
 
+    /**
+     * 保存探店博文
+     */
     @Override
     public Result saveBlog(Blog blog) {
         // 获取登录用户
         UserDTO user = UserHolder.getUser();
         blog.setUserId(user.getId());
+        //探店博客必须关联店铺
+        if (blog.getShopId() == null) {
+            return Result.fail("店铺id不能为空");
+        }
         // 保存探店博文
         boolean isSuccess = save(blog);
         if (!isSuccess) {
@@ -192,5 +202,55 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
         }
         // 返回id
         return Result.ok(blog.getId());
+    }
+
+    /**
+     * 查询当前用户关注的博主推送的博文(滚动分页)
+     */
+    @Override
+    public Result queryBlogOfFollow(Long max, Integer offset) {
+        //1、获取当前用户id
+        Long userId = UserHolder.getUser().getId();
+        //2、查询收件箱
+        String key = FEED_KEY + userId;
+        //2、查询收件箱：滚动分页查询 ZREVRANGEBYSCORE key Max Min LIMIT offset count
+        Set<ZSetOperations.TypedTuple<String>> typedTuples = stringRedisTemplate.opsForZSet().reverseRangeByScoreWithScores(key, 0, max, offset, 2);
+        if (typedTuples == null || typedTuples.isEmpty()) {
+            return Result.ok();
+        }
+        //3、解析收件箱：blogId、score（时间戳）、offset
+        //滚动分页查询
+        List<Long> ids = new ArrayList<>(typedTuples.size());
+        long minTime = 0;//最小时间戳
+        int currentOffset = 0;//当前offset
+        for (ZSetOperations.TypedTuple<String> tuple : typedTuples){
+            //获取blogId
+            ids.add(Long.valueOf(tuple.getValue()));
+            //获取score（时间戳）
+            long time = tuple.getScore().longValue();
+            if (time == minTime){
+                currentOffset++;
+            }else {
+                minTime = time;
+                currentOffset = 1;
+            }
+            //获取offset
+        }
+        //4、根据id查询blog(保证顺序一致，用order by field)
+        List<Blog> blogs = query().in("id", ids).last("ORDER BY FIELD(id," + StrUtil.join(",", ids) + ")").list();
+        //5、查询blog必做的两个操作：查询用户、查询blog用户是否点赞
+        for (Blog blog : blogs) {
+            // 查询用户
+            queryBlogUser(blog);
+            //查询blog用户是否点赞
+            isBlogLiked(blog);
+        }
+        //6、封装并返回
+        ScrollResult scrollResult = new ScrollResult();
+        scrollResult.setList(blogs);
+        scrollResult.setOffset(currentOffset);
+        scrollResult.setMinTime(minTime);
+
+        return Result.ok(scrollResult);
     }
 }
