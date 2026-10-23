@@ -13,20 +13,22 @@ import com.hmdp.service.IUserService;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.SystemConstants;
+import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.redis.connection.BitFieldSubCommands;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.GetMapping;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Random;
-import java.util.UUID;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -44,6 +46,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;//注入StringRedisTemplate
+    @Autowired
+    private UserMapper userMapper;
 
     /**
      * 发送验证码
@@ -107,6 +111,80 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         return Result.ok(token);
     }
 
+    /**
+     * 用户签到
+     */
+    @Override
+    public Result sign() {
+        //1、获取当前登录用户
+        Long userId = UserHolder.getUser().getId();
+        if (userId == null) {
+            return Result.fail("用户未登录");
+        }
+        //2、获取日期
+        LocalDate now = LocalDate.now();
+        //3、拼接key：前缀+用户id+日期
+        String key = RedisConstants.USER_SIGN_KEY + userId + now.format(DateTimeFormatter.ofPattern("yyyyMM"));
+        //4、获取今天是本月的第几天
+        int dayOfMonth = now.getDayOfMonth();
+        //5、写入redis SETBIT key offset 1
+        stringRedisTemplate.opsForValue().setBit(key, dayOfMonth - 1, true);
+        return Result.ok();
+    }
+
+    /**
+     * 获取签到天数
+     */
+    @Override
+    public Result signCount() {
+        //1、获取当前登录用户
+        Long userId = UserHolder.getUser().getId();
+        if (userId == null) {
+            return Result.fail("用户未登录");
+        }
+        //2、获取日期
+        LocalDate now = LocalDate.now();
+        //3、拼接key：前缀+用户id+日期
+        String key = RedisConstants.USER_SIGN_KEY + userId + now.format(DateTimeFormatter.ofPattern("yyyyMM"));
+        //4、获取今天是本月的第几天
+        int dayOfMonth = now.getDayOfMonth();
+        //5、获取本月截至今天为止的所有签到记录，返回的是十进制数字
+        List<Long> signBits = stringRedisTemplate.opsForValue().bitField(
+                key,
+                BitFieldSubCommands
+                        .create()
+                        .get(BitFieldSubCommands.BitFieldType.unsigned(dayOfMonth)).valueAt(0)
+        );
+        if (signBits == null || signBits.isEmpty()) {
+            //没有任何签到结果
+            return Result.ok(0);
+        }
+        //获取第0位
+        Long num = signBits.get(0);
+        if (num == null || num == 0) return Result.ok(0);
+        //6、循环遍历
+        int count = 0;
+        while (true) {
+            //6.1、让这个数字与1做与运算，得到数字的最后一个bit位
+            long bit = num & 1;
+            //6.2、判断这个bit位是否位0
+            if (bit == 0) {
+                //6.3、为0，表示未签到
+                break;
+            }else {
+                //6.4、为1，表示已签到，计数器+1
+                count++;
+            }
+            //6.5、抛弃这个位，数字右移，继续下一个位
+            num >>>= 1;//右移一位，相当于：num = num >> 1
+        }
+        return Result.ok(count);
+    }
+
+
+    /**
+     * 根据手机号创建用户
+     */
     private User createUserWithPhone(String phone) {
         User user = new User();
         user.setPhone(phone);

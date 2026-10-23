@@ -1,5 +1,6 @@
 package com.hmdp.mapper;
 
+import com.hmdp.dto.Result;
 import com.hmdp.entity.User;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 
@@ -13,4 +14,5 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
  */
 public interface UserMapper extends BaseMapper<User> {
 
+    Result signCount();
 }

@@ -99,4 +99,20 @@ public class UserController {
         // 返回
         return Result.ok(userDTO);
     }
+
+    /**
+     * 用户签到功能
+     * @return 签到信息
+     */
+    @PostMapping("/sign")
+    public Result sign(){
+        return userService.sign();
+    }
+    /**
+     * 获取用户本月签到天数
+     */
+    @GetMapping("/sign/count")
+    public Result signCount() {
+        return userService.signCount();
+    }
 }
