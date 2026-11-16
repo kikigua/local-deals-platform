@@ -11,6 +11,7 @@ local orderId = ARGV[3]
 local stockKey = "seckill:stock:" .. voucherId
 ---2.2订单key
 local orderKey = "seckill:order:" .. voucherId
+local reservationKey = "seckill:reservation:" .. voucherId .. ":" .. userId
 
 
 ---3、脚本业务
@@ -27,7 +28,9 @@ end
 redis.call("incrby", stockKey, -1)
 ---3.4下单保存用户id
 redis.call("sadd", orderKey, userId)
----3.5发送消息到队列中
-redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', orderId)
+--记录本次订单id，供Kafka消费和发送失败回滚时核对
+redis.call("set", reservationKey, orderId)
+--旧 Redis Stream 方案：消息写入改由 Java 发送到 Kafka
+--redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', orderId)
 ---返回结果
 return 0
